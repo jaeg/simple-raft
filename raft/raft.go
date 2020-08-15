@@ -30,7 +30,7 @@ var me Node
 var votes = 0
 
 var myFrame *Frame
-var state = "follower"
+var State = "follower"
 var address = ""
 
 func Init(addr string, serverList string) {
@@ -60,15 +60,15 @@ func Init(addr string, serverList string) {
 			//No one else in this pool so be the leader by default.
 			myFrame.CurrentLeader = me
 			myFrame.Nodes = append(myFrame.Nodes, me)
-			state = "leader"
+			State = "leader"
 		}
 	}
 }
 
 func Update(data map[string]string) {
 	myFrame.Data = data
-	log.Info("State: ", state)
-	if state == "leader" {
+	log.Info("State: ", State)
+	if State == "leader" {
 		myFrame.LastUpdated = time.Now()
 		for i := range myFrame.Nodes {
 			if myFrame.Nodes[i] != me {
@@ -77,10 +77,10 @@ func Update(data map[string]string) {
 		}
 	}
 
-	if state == "follower" {
+	if State == "follower" {
 		//If it's been too long since a frame update then start an election
 		if time.Now().Sub(myFrame.LastUpdated) > time.Second {
-			state = "candidate"
+			State = "candidate"
 			myFrame.ElectionNumber++
 			votes = 1 //Vote for myself.
 			log.Info("Starting election ", myFrame.ElectionNumber)
@@ -93,18 +93,18 @@ func Update(data map[string]string) {
 		}
 	}
 
-	if state == "candidate" {
+	if State == "candidate" {
 		time.Sleep(time.Second)
 		if votes == len(myFrame.Nodes) {
 			//Won the election.  Become leader.
-			state = "leader"
+			State = "leader"
 			for i := range myFrame.Nodes {
 				if myFrame.Nodes[i] != me {
 					becomeLeader(myFrame.Nodes[i])
 				}
 			}
 		} else {
-			state = "follower"
+			State = "follower"
 		}
 	}
 	time.Sleep(time.Second)
@@ -206,7 +206,7 @@ func handleDefault(w http.ResponseWriter, r *http.Request) {
 
 func handleIntroduction(w http.ResponseWriter, r *http.Request) {
 	log.Info("Incoming introduction")
-	if state == "leader" {
+	if State == "leader" {
 		log.Info("I'm a leader, become the leader of this follower")
 		var intro IntroductionRequest
 		err := json.NewDecoder(r.Body).Decode(&intro)
@@ -257,15 +257,15 @@ func handleLeader(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if state == "follower" || state == "voter" || state == "candidate" {
+	if State == "follower" || State == "voter" || State == "candidate" {
 		myFrame = frame
-		state = "follower"
+		State = "follower"
 	}
-	if state == "leader" {
+	if State == "leader" {
 		//Stop being leader, other guy is more recent
 		if frame.ElectionNumber > myFrame.ElectionNumber {
 			myFrame = frame
-			state = "follower"
+			State = "follower"
 		} else {
 			for i := range myFrame.Nodes {
 				if myFrame.Nodes[i] != me {
@@ -286,11 +286,11 @@ func handleFrame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if state == "follower" {
+	if State == "follower" {
 		myFrame = frame
-	} else if state == "leader" {
+	} else if State == "leader" {
 		if frame.ElectionNumber > myFrame.ElectionNumber {
-			state = "follower"
+			State = "follower"
 			myFrame = frame
 		}
 	}
@@ -309,7 +309,7 @@ func handleVote(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleElection(w http.ResponseWriter, r *http.Request) {
-	state = "voter"
+	State = "voter"
 	var candidate IntroductionRequest
 	err := json.NewDecoder(r.Body).Decode(&candidate)
 	if err != nil {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"strconv"
 
 	"github.com/jaeg/simple-raft/raft"
 )
@@ -16,7 +17,21 @@ func main() {
 	flag.Parse()
 	raft.Init("127.0.0.1:"+*port, *serverList)
 
+	// Keep raft updating in a go proc
+	go func() {
+		for {
+			raft.Update(data)
+		}
+	}()
+
+	// Do normal service stuff based on our raft state.
+	var i int64
 	for {
-		raft.Update(data)
+		if raft.State == "leader" {
+			data["iteration"] = strconv.Itoa(int(i))
+			i++
+		} else if raft.State == "follower" {
+			i, _ = strconv.ParseInt(data["iteration"], 0, 64)
+		}
 	}
 }
