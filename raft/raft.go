@@ -162,7 +162,7 @@ func introduce(target string) error {
 
 func proposeElection(target Node) error {
 	log.Info("Proposing election ", target)
-	b, err := json.Marshal(&IntroductionRequest{Address: address})
+	b, err := json.Marshal(&IntroductionRequest{Address: address, ElectionNumber: myFrame.ElectionNumber})
 	if err != nil {
 		log.WithError(err).Error("Failed marshaling intro")
 		votes++ //Corrupt politics. Count their vote anyway.
@@ -227,7 +227,8 @@ func sendFrame(target Node) error {
 
 //IntroductionRequest Used to introduce Node to pool.
 type IntroductionRequest struct {
-	Address string
+	Address        string
+	ElectionNumber int
 }
 
 func handleDefault(w http.ResponseWriter, r *http.Request) {
@@ -348,22 +349,25 @@ func handleElection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Info("Voting for ", candidate.Address)
-	b, err := json.Marshal(&IntroductionRequest{Address: address})
-	if err != nil {
-		log.WithError(err).Error("Failed marshaling intro")
-		http.Error(w, "Failed marshaling intro", 500)
-		return
-	}
+	if candidate.ElectionNumber > myFrame.ElectionNumber {
+		myFrame.ElectionNumber = candidate.ElectionNumber
+		log.Info("Voting for ", candidate.Address)
+		b, err := json.Marshal(&IntroductionRequest{Address: address})
+		if err != nil {
+			log.WithError(err).Error("Failed marshaling intro")
+			http.Error(w, "Failed marshaling intro", 500)
+			return
+		}
 
-	resp, err := http.Post("http://"+candidate.Address+"/vote", "application/json", bytes.NewBuffer(b))
-	if err != nil {
-		fmt.Println(err)
-		http.Error(w, "Failed posting vote", 500)
-		return
-	}
+		resp, err := http.Post("http://"+candidate.Address+"/vote", "application/json", bytes.NewBuffer(b))
+		if err != nil {
+			fmt.Println(err)
+			http.Error(w, "Failed posting vote", 500)
+			return
+		}
 
-	if resp.StatusCode != http.StatusOK {
-		http.Error(w, "Candidate failed to get post", 500)
+		if resp.StatusCode != http.StatusOK {
+			http.Error(w, "Candidate failed to get post", 500)
+		}
 	}
 }
