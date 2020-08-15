@@ -2,9 +2,11 @@ package raft
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"strings"
@@ -12,6 +14,11 @@ import (
 
 	log "github.com/sirupsen/logrus"
 )
+
+// HTTPClient interface
+type httpClient interface {
+	Post(url string, contentType string, body io.Reader) (*http.Response, error)
+}
 
 type Node struct {
 	Address           string
@@ -33,19 +40,36 @@ var myFrame *Frame
 var State = "follower"
 var address = ""
 
-func Init(addr string, serverList string) {
+var client httpClient
+var raftServer *http.Server
+
+var updateInterval time.Duration
+var leaderTimeout time.Duration
+var electionTimeout time.Duration
+
+func Init(addr string, serverList string, updateI time.Duration, leaderT time.Duration, electionT time.Duration) {
+	if client == nil {
+		client = &http.Client{}
+	}
+
+	updateInterval = updateI
+	leaderTimeout = leaderT
+	electionTimeout = electionT
+
 	myFrame = &Frame{}
 	address = addr
 
 	//Some routes
-	http.HandleFunc("/", handleDefault)
-	http.HandleFunc("/introduce", handleIntroduction)
-	http.HandleFunc("/vote", handleVote)
-	http.HandleFunc("/election", handleElection)
-	http.HandleFunc("/lead", handleLeader)
-	http.HandleFunc("/frame", handleFrame)
 	go func() {
-		err := http.ListenAndServe(addr, nil)
+		mux := http.NewServeMux()
+		mux.HandleFunc("/", handleDefault)
+		mux.HandleFunc("/introduce", handleIntroduction)
+		mux.HandleFunc("/vote", handleVote)
+		mux.HandleFunc("/election", handleElection)
+		mux.HandleFunc("/lead", handleLeader)
+		mux.HandleFunc("/frame", handleFrame)
+		raftServer = &http.Server{Addr: addr, Handler: mux}
+		err := raftServer.ListenAndServe()
 		log.WithError(err).Error("Error listening")
 	}()
 
@@ -79,7 +103,7 @@ func Update(data map[string]string) {
 
 	if State == "follower" {
 		//If it's been too long since a frame update then start an election
-		if time.Now().Sub(myFrame.LastUpdated) > time.Second {
+		if time.Now().Sub(myFrame.LastUpdated) > leaderTimeout {
 			State = "candidate"
 			myFrame.ElectionNumber++
 			votes = 1 //Vote for myself.
@@ -94,7 +118,7 @@ func Update(data map[string]string) {
 	}
 
 	if State == "candidate" {
-		time.Sleep(time.Second)
+		time.Sleep(electionTimeout)
 		if votes == len(myFrame.Nodes) {
 			//Won the election.  Become leader.
 			State = "leader"
@@ -107,7 +131,13 @@ func Update(data map[string]string) {
 			State = "follower"
 		}
 	}
-	time.Sleep(time.Second)
+	time.Sleep(updateInterval)
+}
+
+func Stop() {
+	if raftServer != nil {
+		raftServer.Shutdown(context.TODO())
+	}
 }
 
 func introduce(target string) error {
@@ -118,7 +148,7 @@ func introduce(target string) error {
 		return err
 	}
 
-	resp, err := http.Post("http://"+target+"/introduce", "application/json", bytes.NewBuffer(b))
+	resp, err := client.Post("http://"+target+"/introduce", "application/json", bytes.NewBuffer(b))
 	if err != nil {
 		fmt.Println(err)
 		return err

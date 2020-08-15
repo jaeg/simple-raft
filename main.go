@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"strconv"
+	"time"
 
 	"github.com/jaeg/simple-raft/raft"
 )
@@ -15,7 +16,7 @@ var data map[string]string
 func main() {
 	data = make(map[string]string)
 	flag.Parse()
-	raft.Init("127.0.0.1:"+*port, *serverList)
+	raft.Init("127.0.0.1:"+*port, *serverList, time.Second/2, time.Second, time.Second)
 
 	// Keep raft updating in a go proc
 	go func() {
