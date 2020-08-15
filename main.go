@@ -2,6 +2,8 @@ package main
 
 import (
 	"flag"
+
+	"github.com/jaeg/simple-raft/raft"
 )
 
 var serverList = flag.String("servers", "", "Comma separated list of server address in pool")
@@ -12,9 +14,9 @@ var data map[string]string
 func main() {
 	data = make(map[string]string)
 	flag.Parse()
-	Init("127.0.0.1:"+*port, *serverList)
+	raft.Init("127.0.0.1:"+*port, *serverList)
 
 	for {
-		Update(data)
+		raft.Update(data)
 	}
 }
