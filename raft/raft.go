@@ -93,6 +93,7 @@ func Init(addr string, serverList string, serverInterface ServerInterface, updat
 			myFrame.CurrentLeader = me
 			myFrame.Nodes = append(myFrame.Nodes, me)
 			State = "leader"
+			me.server.StateChange(State)
 		}
 	}
 }
@@ -119,6 +120,7 @@ func Update() {
 		//If it's been too long since a frame update then start an election
 		if time.Now().Sub(myFrame.LastUpdated) > leaderTimeout {
 			State = "candidate"
+			me.server.StateChange(State)
 			myFrame.ElectionNumber++
 			votes = 1 //Vote for myself.
 			log.Info("Starting election ", myFrame.ElectionNumber)
@@ -136,6 +138,7 @@ func Update() {
 		if votes == len(myFrame.Nodes) {
 			//Won the election.  Become leader.
 			State = "leader"
+			me.server.StateChange(State)
 			for i := range myFrame.Nodes {
 				if myFrame.Nodes[i].Address != me.Address {
 					becomeLeader(myFrame.Nodes[i])
@@ -143,6 +146,7 @@ func Update() {
 			}
 		} else {
 			State = "follower"
+			me.server.StateChange(State)
 		}
 	}
 	time.Sleep(updateInterval)
@@ -305,12 +309,14 @@ func handleLeader(w http.ResponseWriter, r *http.Request) {
 	if State == "follower" || State == "voter" || State == "candidate" {
 		myFrame = frame
 		State = "follower"
+		me.server.StateChange(State)
 	}
 	if State == "leader" {
 		//Stop being leader, other guy is more recent
 		if frame.ElectionNumber > myFrame.ElectionNumber {
 			myFrame = frame
 			State = "follower"
+			me.server.StateChange(State)
 		} else {
 			for i := range myFrame.Nodes {
 				if myFrame.Nodes[i].Address != me.Address {
@@ -338,6 +344,7 @@ func handleFrame(w http.ResponseWriter, r *http.Request) {
 	} else if State == "leader" {
 		if frame.ElectionNumber > myFrame.ElectionNumber {
 			State = "follower"
+			me.server.StateChange(State)
 			myFrame = frame
 		}
 	}
@@ -357,6 +364,7 @@ func handleVote(w http.ResponseWriter, r *http.Request) {
 
 func handleElection(w http.ResponseWriter, r *http.Request) {
 	State = "voter"
+	me.server.StateChange(State)
 	var candidate IntroductionRequest
 	err := json.NewDecoder(r.Body).Decode(&candidate)
 	if err != nil {
