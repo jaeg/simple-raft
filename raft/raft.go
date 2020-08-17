@@ -20,17 +20,25 @@ type httpClient interface {
 	Post(url string, contentType string, body io.Reader) (*http.Response, error)
 }
 
+//ServerInterface implement this interface to customize raft behavior
+type ServerInterface interface {
+	CommitLogs([]string) error        // Called when follower is told to commit logs
+	GetLogsToPush() ([]string, error) // Called when leader is told to get logs it needs to push
+	StateChange(string) error         // Called when state changes
+}
+
 type Node struct {
 	Address           string
 	LastRequestFailed bool
+	server            ServerInterface
 }
 
 type Frame struct {
 	CurrentLeader  Node
 	ElectionNumber int
 	Nodes          []Node
-	Data           map[string]string
 	LastUpdated    time.Time
+	Logs           []string
 }
 
 var me Node
@@ -47,7 +55,7 @@ var updateInterval time.Duration
 var leaderTimeout time.Duration
 var electionTimeout time.Duration
 
-func Init(addr string, serverList string, updateI time.Duration, leaderT time.Duration, electionT time.Duration) {
+func Init(addr string, serverList string, serverInterface ServerInterface, updateI time.Duration, leaderT time.Duration, electionT time.Duration) {
 	if client == nil {
 		client = &http.Client{}
 	}
@@ -73,7 +81,7 @@ func Init(addr string, serverList string, updateI time.Duration, leaderT time.Du
 		log.WithError(err).Error("Error listening")
 	}()
 
-	me = Node{Address: address}
+	me = Node{Address: address, server: serverInterface}
 
 	//Introduce myself to all the servers in the list.
 	servers := strings.Split(serverList, ",")
@@ -89,13 +97,19 @@ func Init(addr string, serverList string, updateI time.Duration, leaderT time.Du
 	}
 }
 
-func Update(data map[string]string) {
-	myFrame.Data = data
+func Update() {
 	log.Info("State: ", State)
 	if State == "leader" {
+		logs, err := me.server.GetLogsToPush()
+		if err != nil {
+			log.WithError(err).Error("Error getting logs to push")
+			return
+		}
+
+		myFrame.Logs = logs
 		myFrame.LastUpdated = time.Now()
 		for i := range myFrame.Nodes {
-			if myFrame.Nodes[i] != me {
+			if myFrame.Nodes[i].Address != me.Address {
 				sendFrame(myFrame.Nodes[i])
 			}
 		}
@@ -110,7 +124,7 @@ func Update(data map[string]string) {
 			log.Info("Starting election ", myFrame.ElectionNumber)
 
 			for i := range myFrame.Nodes {
-				if myFrame.Nodes[i] != me {
+				if myFrame.Nodes[i].Address != me.Address {
 					proposeElection(myFrame.Nodes[i])
 				}
 			}
@@ -123,7 +137,7 @@ func Update(data map[string]string) {
 			//Won the election.  Become leader.
 			State = "leader"
 			for i := range myFrame.Nodes {
-				if myFrame.Nodes[i] != me {
+				if myFrame.Nodes[i].Address != me.Address {
 					becomeLeader(myFrame.Nodes[i])
 				}
 			}
@@ -299,7 +313,7 @@ func handleLeader(w http.ResponseWriter, r *http.Request) {
 			State = "follower"
 		} else {
 			for i := range myFrame.Nodes {
-				if myFrame.Nodes[i] != me {
+				if myFrame.Nodes[i].Address != me.Address {
 					becomeLeader(myFrame.Nodes[i])
 				}
 			}
@@ -310,6 +324,7 @@ func handleLeader(w http.ResponseWriter, r *http.Request) {
 func handleFrame(w http.ResponseWriter, r *http.Request) {
 	log.Info("Got Frame!")
 	var frame *Frame
+
 	err := json.NewDecoder(r.Body).Decode(&frame)
 	if err != nil {
 		log.WithError(err).Error("Failed parsing frame request")
@@ -319,6 +334,7 @@ func handleFrame(w http.ResponseWriter, r *http.Request) {
 
 	if State == "follower" {
 		myFrame = frame
+		me.server.CommitLogs(myFrame.Logs)
 	} else if State == "leader" {
 		if frame.ElectionNumber > myFrame.ElectionNumber {
 			State = "follower"
